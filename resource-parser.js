@@ -628,15 +628,49 @@
     for (var i = 1; i < segs.length; i++) {
       var kv = segs[i].trim();
       var ei = kv.indexOf('=');
-      if (ei < 0) continue;
+      if (ei < 0) {
+        // 没有 = 的片段是上一项值里被逗号切开的部分（最常见是 tag 里带逗号），
+        // 拼回上一项，别直接丢掉（KOP 的 QXFix 也是这么把碎片接回 tag 的）
+        if (params.length) params[params.length - 1].v += ', ' + kv;
+        continue;
+      }
       params.push({ k: kv.slice(0, ei).trim(), v: kv.slice(ei + 1).trim() });
     }
     return { type: type, addr: addr, params: params };
   }
   function buildQxLineFromParts(p) {
     var parts = [p.type + '=' + p.addr];
-    for (var i = 0; i < p.params.length; i++) parts.push(p.params[i].k + '=' + p.params[i].v);
+    var tagPart = null;
+    for (var i = 0; i < p.params.length; i++) {
+      if (p.params[i].k === 'tag') { tagPart = p.params[i]; continue; }
+      parts.push(p.params[i].k + '=' + p.params[i].v);
+    }
+    // tag 永远放最后（KOP 的 QXFix 也这么做，QX 按 tag 认节点名）
+    if (tagPart) parts.push('tag=' + tagPart.v);
     return parts.join(', ');
+  }
+  // QXFix 同款清洗：修 tag、修 obfs-uri 里的逗号、丢 QX 不支持的类型
+  function sanitizeParts(p) {
+    if (p.type === 'tuic' || p.type === 'wireguard') return false;
+    var tag = getParam(p, 'tag') || '';
+    if (tag.indexOf(',') >= 0) {
+      tag = tag.split(',').join(' ');
+      setParam(p, 'tag', tag);
+    }
+    if (!tag) {
+      // 没名字的节点 QX 不认，仿 KOP 用“类型 | IP”补一个
+      var hostOnly = p.addr.split(':')[0];
+      setParam(p, 'tag', p.type + ' | ' + hostOnly);
+    }
+    var uri = getParam(p, 'obfs-uri');
+    if (uri && uri.indexOf(',') >= 0) {
+      var first = uri.split(',')[0];
+      if (first.indexOf('?') >= 0) first = first.split('?')[0];
+      var qi = uri.lastIndexOf('?');
+      var query = qi >= 0 ? uri.slice(qi) : '';
+      setParam(p, 'obfs-uri', first + query);
+    }
+    return true;
   }
   function getParam(p, key) {
     for (var i = 0; i < p.params.length; i++) {
@@ -662,6 +696,7 @@
     for (var i = 0; i < lines.length; i++) {
       var p = splitQxLine(lines[i]);
       if (!p.addr) continue;
+      if (!sanitizeParts(p)) continue;
       var tag = getParam(p, 'tag') || '';
       if (params.inList) {
         var keep = false;
