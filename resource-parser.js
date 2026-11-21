@@ -71,7 +71,7 @@
     var out = transformLines(lines, params);
     if (!out.length) { doneOnce({ content: orig }); return; }
     log('解析完成：' + out.length + ' 个节点');
-    doneOnce({ content: out.join('\n') });
+    doneOnce({ content: b64encode(out.join('\n')) });
   }
 
   /* ---------------- 参数 ---------------- */
@@ -137,6 +137,34 @@
       else if (c > 191 && c < 224) out += String.fromCharCode(((c & 31) << 6) | (bytes[i++] & 63));
       else if (c > 223 && c < 240) out += String.fromCharCode(((c & 15) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63));
       else out += String.fromCharCode(((c & 7) << 18) | ((bytes[i++] & 63) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63));
+    }
+    return out;
+  }
+  // UTF-8 感知的 base64 编码（KOP 的做法：服务器输出整体 base64 后返回，
+  // QX 收到后自动解码并逐个忽略坏节点；直接返回明文时一行坏掉整个订阅都拒收）
+  function b64encode(s) {
+    var bytes = [];
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c < 128) { bytes.push(c); }
+      else if (c < 2048) { bytes.push(192 | (c >> 6), 128 | (c & 63)); }
+      else if (c >= 55296 && c <= 56319 && i + 1 < s.length) {
+        var c2 = s.charCodeAt(i + 1);
+        if (c2 >= 56320 && c2 <= 57343) {
+          var cp = 65536 + ((c - 55296) * 1024) + (c2 - 56320);
+          bytes.push(240 | (cp >> 18), 128 | ((cp >> 12) & 63), 128 | ((cp >> 6) & 63), 128 | (cp & 63));
+          i++;
+        } else { bytes.push(224 | (c >> 12), 128 | ((c >> 6) & 63), 128 | (c & 63)); }
+      }
+      else { bytes.push(224 | (c >> 12), 128 | ((c >> 6) & 63), 128 | (c & 63)); }
+    }
+    var out = '';
+    for (var j = 0; j < bytes.length; j += 3) {
+      var b1 = bytes[j], b2 = (j + 1 < bytes.length) ? bytes[j + 1] : 0, b3 = (j + 2 < bytes.length) ? bytes[j + 2] : 0;
+      out += B64CHARS.charAt(b1 >> 2);
+      out += B64CHARS.charAt(((b1 & 3) << 4) | (b2 >> 4));
+      out += (j + 1 < bytes.length) ? B64CHARS.charAt(((b2 & 15) << 2) | (b3 >> 6)) : '=';
+      out += (j + 2 < bytes.length) ? B64CHARS.charAt(b3 & 63) : '=';
     }
     return out;
   }
