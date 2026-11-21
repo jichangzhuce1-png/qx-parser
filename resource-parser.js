@@ -429,13 +429,27 @@
       params.push('obfs=http');
       params.push('obfs-host=' + (o.hostHeader || o.host));
       params.push('obfs-uri=' + (o.path || '/'));
+    } else if (o.tls) {
+      params.push('obfs=over-tls');
+      params.push('obfs-host=' + (o.sni || o.hostHeader || o.host));
     }
     params.push('fast-open=false', 'udp-relay=false');
     return qxLine('vmess', o.host + ':' + o.port, params, o.tag);
   }
   function buildVless(o) {
     var params = ['method=none', 'password=' + o.uuid];
-    if (o.security === 'reality') {
+    var isTls = (o.security === 'tls' || o.security === 'reality');
+    if (o.net === 'ws') {
+      // WS 传输只用一个 obfs（wss/wss），不能再叠加 over-tls，否则一行里出现两个 obfs=
+      params.push('obfs=' + (isTls ? 'wss' : 'ws'));
+      params.push('obfs-host=' + (o.hostHeader || o.sni || o.host));
+      params.push('obfs-uri=' + (o.path || '/'));
+      if (o.security === 'reality') {
+        if (o.pbk) params.push('reality-base64-pubkey=' + o.pbk);
+        if (o.sid) params.push('reality-hex-shortid=' + o.sid);
+        if (o.flow) params.push('vless-flow=' + o.flow);
+      }
+    } else if (o.security === 'reality') {
       params.push('obfs=over-tls');
       if (o.sni) params.push('obfs-host=' + o.sni);
       if (o.pbk) params.push('reality-base64-pubkey=' + o.pbk);
@@ -444,11 +458,6 @@
     } else if (o.security === 'tls') {
       params.push('obfs=over-tls');
       if (o.sni) params.push('obfs-host=' + o.sni);
-    }
-    if (o.net === 'ws') {
-      params.push('obfs=' + (o.security === 'tls' || o.security === 'reality' ? 'wss' : 'ws'));
-      params.push('obfs-host=' + (o.hostHeader || o.sni || o.host));
-      params.push('obfs-uri=' + (o.path || '/'));
     }
     params.push('udp-relay=true');
     return qxLine('vless', o.host + ':' + o.port, params, o.tag);
